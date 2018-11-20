@@ -3,25 +3,12 @@ package lua
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/yuin/gopher-lua"
 
 	R "reflect"
 )
-
-func tagOption(tag reflect.StructTag) bool {
-
-	value, ok := tag.Lookup("lua")
-
-	if ok {
-		return value == "option"
-	}
-
-	return false
-}
 
 func luaValuePod(vm *VM, v R.Value, x *Value) (ok bool) {
 
@@ -143,7 +130,7 @@ func luaValueTypes(vm *VM, v R.Value, x *Value) bool {
 
 	var (
 		vt     = v.Type()
-		xt, ok = vmTypeLookup(vm, vt)
+		xt, ok = typeLookup(vm, vt)
 	)
 
 	fmt.Println(xt, ok)
@@ -579,62 +566,6 @@ func goValueFunction(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 
 }
 
-type tags struct {
-	option bool
-	name   string
-	skip   bool
-}
-
-func makeTags(field R.StructField) tags {
-
-	var (
-		x = tags{
-			option: false,
-			name:   field.Name,
-			skip:   false,
-		}
-		tags = strings.Split(field.Tag.Get("lua"), ",")
-	)
-
-	for _, tag := range tags {
-
-		if len(tag) == 0 {
-			continue
-		}
-
-		kv := strings.Split(tag, "=")
-
-		switch strings.ToLower(kv[0]) {
-		case "-":
-			x.skip = true
-		case "option":
-			x.option = true
-		default:
-			panic(
-				fmt.Sprintf("unknonw tag %s for field %s", kv[0], field.Name))
-
-		}
-	}
-
-	return x
-}
-
-func isOptional(name string, tag R.StructTag) bool {
-
-	value, ok := tag.Lookup(name)
-
-	if !ok {
-		return false
-	}
-
-	if value == "option" {
-		return true
-	}
-
-	return false
-
-}
-
 func goValueObject(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 
 	var (
@@ -791,41 +722,4 @@ func As(vm *VM, src Value, value interface{}) error {
 
 func ToValue(vm *VM, v interface{}) Value {
 	return luaValue(vm, R.ValueOf(v))
-}
-
-func VMFunction(vm *VM, name string, v interface{}) error {
-
-	return As(
-		vm,
-		vm.GetGlobal(name),
-		v,
-	)
-}
-
-func VMValue(vm *VM, name string, v interface{}) error {
-
-	return As(
-		vm,
-		vm.GetGlobal(name),
-		v)
-}
-
-func NewFunc(vm *VM, value interface{}) *Function {
-
-	var (
-		v = R.ValueOf(value)
-	)
-
-	if v.Kind() != R.Func {
-		panic("new func argument #1 must type of func")
-	}
-
-	fn, ok := ToValue(vm, value).(*Function)
-
-	if !ok {
-		panic("new function error")
-	}
-
-	return fn
-
 }

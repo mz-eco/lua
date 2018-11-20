@@ -1,6 +1,10 @@
 package lua
 
-import lua "github.com/yuin/gopher-lua"
+import (
+	R "reflect"
+
+	lua "github.com/yuin/gopher-lua"
+)
 
 type VM = lua.LState
 
@@ -16,4 +20,28 @@ type (
 
 var (
 	Nil = lua.LNil
+)
+
+type tableMapping interface {
+	table()
+}
+
+type class interface {
+	setValue(value Value)
+	getValue() Value
+}
+
+type moduleMembers interface {
+	module()
+}
+
+func typedCaller(_ *Call) int { return 0 }
+
+var (
+	typeNil          = R.TypeOf(nil)
+	typeTableMapping = R.TypeOf((*tableMapping)(nil))
+	typeClass        = R.TypeOf((*class)(nil)).Elem()
+	typeCall         = R.TypeOf((*Call)(nil))
+	typeCaller       = R.TypeOf(typedCaller)
+	typeValue        = R.TypeOf((*Value)(nil)).Elem()
 )

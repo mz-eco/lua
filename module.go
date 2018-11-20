@@ -4,10 +4,6 @@ import (
 	R "reflect"
 )
 
-type moduleMembers interface {
-	module()
-}
-
 type ModuleMembers struct {
 }
 

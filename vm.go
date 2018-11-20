@@ -11,3 +11,20 @@ func New() *VM {
 		IncludeGoStackTrace: true,
 	})
 }
+
+func VMFunction(vm *VM, name string, v interface{}) error {
+
+	return As(
+		vm,
+		vm.GetGlobal(name),
+		v,
+	)
+}
+
+func VMValue(vm *VM, name string, v interface{}) error {
+
+	return As(
+		vm,
+		vm.GetGlobal(name),
+		v)
+}
