@@ -2,6 +2,7 @@ package lua
 
 import (
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,258 +11,92 @@ import (
 	R "reflect"
 )
 
-func GoValue(x interface{}) R.Type {
-	return R.TypeOf(x).Elem()
-}
+var (
+	typeNil = R.TypeOf(nil)
+)
 
 func GoType(x interface{}) R.Type {
+
+	var (
+		t = R.TypeOf(x)
+	)
+
+	if t.Kind() != R.Ptr {
+		panic("go type input must bu a point")
+	}
+
+	if !t.Implements(typeClass) {
+		panic(
+			fmt.Sprintf("lua type [%s] must bu implement lua.Typed", t))
+	}
+
 	return R.TypeOf(x)
 }
 
-type TypedMembers interface {
-	setVM(vm *VM)
+type class interface {
+	setValue(value Value)
+	getValue() Value
 }
 
-type TypeMembers struct {
-	VM *VM
+var (
+	typeClass = R.TypeOf((*class)(nil)).Elem()
+)
+
+type Typed struct {
+	value Value
 }
 
-func (m *TypeMembers) setVM(vm *VM) {
-	m.VM = vm
+func (m *Typed) setValue(v Value) {
+	m.value = v
+}
+
+func (m *Typed) getValue() Value {
+	return m.value
+}
+
+func (m *Typed) class() {
+
 }
 
 type Type struct {
-	UUID    string
-	Name    string
-	Type    R.Type
-	Members TypedMembers
+	UUID string
+	Name string
+	Type R.Type
+	name string
+}
+
+func (m *Type) checkValue(vm *VM) (R.Value, error) {
+
+	ud := vm.CheckUserData(1)
+
+	if ud == nil {
+		return R.Value{}, errors.New(
+			fmt.Sprintf(
+				"load [%s:%s] from vm check lua type error", m.Name, m.UUID))
+	}
+
+	var (
+		ov = R.ValueOf(ud.Value)
+		ot = ov.Type()
+	)
+
+	if ot != m.Type {
+		return R.Value{}, errors.New(
+			fmt.Sprintf(
+				"load [%s:%s] from argument error, want <%s> given <%s>",
+				m.Name, m.UUID, m.Type, ot,
+			))
+	}
+
+	return ov, nil
 }
 
 func (m *Type) GetName() string {
-
-	if len(m.Name) != 0 {
-		return m.Name
-	}
-
 	return strings.ToUpper(
-		fmt.Sprintf("GoType%x", md5.Sum([]byte(m.UUID))))
+		fmt.Sprintf("GoMeta%x", md5.Sum([]byte(m.UUID))))
 }
 
 type TypeLoader func() *Type
-
-func memberCaller(t R.Type, mt R.Method, x *Type) GFunction {
-
-	var (
-		hasError = false
-		no       = t.NumOut()
-		ret      = no
-	)
-
-	if no > 0 {
-		hasError = t.Out(no - 1).Implements(typeError)
-		if hasError {
-			ret = no - 1
-		}
-
-	}
-
-	return func(vm *VM) int {
-
-		fmt.Println(vm.GetTop(), vm.Get(0), vm.Get(1), vm.Get(2))
-		ud := vm.CheckUserData(1)
-		if ud == nil {
-			return 0
-		}
-
-		if ud.Value == nil {
-			vm.TypeError(1, lua.LTUserData)
-			return 0
-		}
-
-		uv := R.ValueOf(ud.Value)
-		ut := uv.Type()
-
-		if ut != x.Type {
-			vm.TypeError(1, lua.LTUserData)
-			return 0
-		}
-
-		var (
-			in   = make([]R.Value, 0)
-			opts = &asOptions{
-				vm:       vm,
-				skipFunc: false,
-				base:     Nil,
-				optional: false,
-				raise:    false,
-			}
-		)
-
-		for index := 1; index < t.NumIn()-1; index++ {
-
-			var (
-				it = t.In(index)
-				iv = R.New(it)
-				lv = vm.Get(index)
-			)
-
-			if goValue(vm, iv.Elem(), lv, opts) && opts.Ok() {
-				in = append(in, iv.Elem())
-			} else {
-				vm.ArgError(
-					index,
-					opts.GetError(
-						errTypeConvert{
-							"",
-							lv.Type(),
-							it,
-						},
-					).Error(),
-				)
-
-				return 0
-			}
-
-		}
-
-		m := uv.MethodByName(mt.Name)
-		o := m.Call(in)
-
-		fmt.Println("xx", hasError)
-		if hasError {
-			err := o[ret]
-
-			if !err.IsNil() {
-				vm.RaiseError(
-					fmt.Sprint(err.Interface()))
-
-				return 0
-			}
-		}
-
-		for index := 0; index < ret; index++ {
-			vm.Push(luaValue(vm, o[index]))
-		}
-
-		return ret
-
-	}
-}
-
-func staticCaller(m R.Value, x *Type) GFunction {
-
-	var (
-		t = m.Type()
-	)
-
-	return func(vm *VM) int {
-
-		var (
-			in   = make([]R.Value, 0)
-			opts = &asOptions{
-				vm:       vm,
-				skipFunc: false,
-				base:     Nil,
-				optional: false,
-				raise:    false,
-			}
-		)
-
-		for index := 0; index < t.NumIn(); index++ {
-
-			var (
-				it = t.In(index)
-				iv = R.New(it)
-				lv = vm.Get(index + 1)
-			)
-
-			if goValue(vm, iv.Elem(), lv, opts) && opts.Ok() {
-				in = append(in, iv.Elem())
-			} else {
-				vm.ArgError(
-					index,
-					opts.GetError(
-						errTypeConvert{
-							"",
-							lv.Type(),
-							it,
-						},
-					).Error(),
-				)
-
-				return 0
-			}
-		}
-
-		o := m.Call(in)
-
-		if len(o) != 1 {
-			vm.RaiseError("call outer fail")
-			return 0
-		}
-
-		u := vm.NewUserData()
-		u.Value = o[0].Interface()
-
-		vm.SetMetatable(u, vm.GetTypeMetatable(x.Name))
-		vm.Push(u)
-
-		return 1
-	}
-}
-
-func members(vm *VM, tbl *Table, x *Type) {
-
-	var (
-		t   = x.Type
-		n   = t.NumMethod()
-		fns = make(map[string]GFunction)
-	)
-
-	for index := 0; index < n; index++ {
-		var (
-			mt = t.Method(index)
-			ft = mt.Type
-		)
-
-		fns[mt.Name] = memberCaller(ft, mt, x)
-	}
-
-	vm.SetField(tbl, "__index",
-		vm.SetFuncs(vm.NewTable(), fns),
-	)
-
-}
-
-func static(vm *VM, tbl *Table, v R.Value, x *Type) {
-
-	var (
-		t = v.Type()
-		n = t.NumMethod()
-	)
-
-	for index := 0; index < n; index++ {
-		var (
-			mt = t.Method(index)
-			mv = v.Method(index)
-			ft = mt.Type
-			ol = ft.NumOut()
-		)
-
-		if ol != 1 || ft.Out(index) != x.Type {
-			panic(
-				fmt.Sprintf("type static function must only return type %s", x.Type))
-		}
-
-		vm.SetField(
-			tbl,
-			mt.Name,
-			vm.NewFunction(
-				staticCaller(mv, x)))
-
-	}
-
-}
 
 type golangTypes struct {
 	types map[R.Type]*Type
@@ -269,21 +104,30 @@ type golangTypes struct {
 
 func (m *golangTypes) Define(x *Type) {
 
-	v, ok := m.types[x.Type]
+	_, ok := m.types[x.Type]
 
-	if !ok {
+	if ok {
 		panic(
 			fmt.Sprintf("type [%s:%s] already exists", x.Type.Name(), x.UUID))
 	}
-	m.types[x.Type] = v
+
+	m.types[x.Type] = x
 }
 
 func (m *golangTypes) Lookup(x R.Type) (t *Type, ok bool) {
 
 	t, ok = m.types[x]
 
-	return
+	return t, ok
 
+}
+
+func vmTypeLookup(vm *VM, t R.Type) (*Type, bool) {
+	return vmTypes(vm).Lookup(t)
+}
+
+func vmTypeDefine(vm *VM, t *Type) {
+	vmTypes(vm).Define(t)
 }
 
 func vmTypes(vm *VM) (types *golangTypes) {
@@ -302,6 +146,8 @@ func vmTypes(vm *VM) (types *golangTypes) {
 		ud := vm.NewUserData()
 		ud.Value = types
 		vm.SetGlobal(name, ud)
+
+		return
 	} else {
 		ud, ok := lv.(*lua.LUserData)
 
@@ -319,6 +165,138 @@ func vmTypes(vm *VM) (types *golangTypes) {
 	}
 }
 
+func setter(vm *VM, x *Type) GFunction {
+	i := &Invoker{
+		Name: "__newindex",
+		GoFunc: func(c *Call) int {
+
+			var (
+				o, err = x.checkValue(c.vm)
+			)
+
+			if err != nil {
+				c.ArgError(1, err.Error())
+				return 0
+			}
+
+			if len(c.Args) != 2 {
+				c.ArgError(1, "setter argument error.")
+				return 0
+			}
+
+			v := c.Args[0]
+
+			name := lua.LVAsString(v)
+
+			if len(name) == 0 {
+				c.ArgError(1, "element not found.")
+				return 0
+			}
+
+			field := o.Elem().FieldByName(name)
+
+			if !field.IsValid() {
+				c.ArgError(1, "element %s not found.", name)
+				return 0
+			}
+
+			arg := c.Args[1]
+			opts := &asOptions{
+				vm:       c.vm,
+				field:    name,
+				skipFunc: true,
+				base:     Nil,
+				optional: false,
+				raise:    false,
+			}
+
+			if goValue(c.vm, field, arg, opts) && opts.Ok() {
+				return 0
+			} else {
+				c.ArgError(
+					2,
+					"%s",
+					errTypeConvert{name, arg.Type(), field.Type()},
+				)
+				return 0
+			}
+
+			return 0
+		},
+	}
+
+	return VMGFunction(i)
+}
+
+func getter(vm *VM, x *Type) GFunction {
+
+	members := memberFunctions(x.Type, func(v R.Value, m int, i *Invoker) {
+
+		i.Caller = func(vm *VM) (R.Value, error) {
+
+			var (
+				ov, err = x.checkValue(vm)
+			)
+
+			if err != nil {
+				return R.Value{}, err
+			}
+
+			return ov.MethodByName(i.Name), nil
+		}
+
+	})
+
+	i := &Invoker{
+		Name: "__index",
+		GoFunc: func(c *Call) int {
+
+			var (
+				o, err = x.checkValue(c.vm)
+			)
+
+			if err != nil {
+				c.ArgError(1, err.Error())
+				return 0
+			}
+
+			if len(c.Args) != 1 {
+				c.ArgError(1, "setter argument error.")
+				return 0
+			}
+
+			v := c.Args[0]
+
+			name := lua.LVAsString(v)
+
+			if len(name) == 0 {
+				c.ArgError(1, "element not found.")
+				return 0
+			}
+
+			field := o.Elem().FieldByName(name)
+
+			if !field.IsValid() {
+
+				member, ok := members[name]
+
+				if !ok {
+					c.ArgError(1, "element %s not found.", name)
+					return 0
+				}
+				return member(c.vm)
+			}
+
+			c.vm.Push(luaValue(c.vm, field))
+
+			return 1
+		},
+	}
+
+	return VMGFunction(i)
+
+}
+
 func Define(vm *VM, x *Type) {
 
 	var (
@@ -326,17 +304,21 @@ func Define(vm *VM, x *Type) {
 		tbl  = vm.NewTypeMetatable(name)
 	)
 
+	x.name = name
 	vm.SetGlobal(name, tbl)
 
-	if x.Members != nil {
-		x.Members.setVM(vm)
+	vm.SetField(
+		tbl,
+		"__newindex",
+		vm.NewFunction(
+			setter(vm, x)))
 
-		static(
-			vm,
-			tbl,
-			R.ValueOf(x.Members),
-			x)
-	}
+	vm.SetField(
+		tbl,
+		"__index",
+		vm.NewFunction(
+			getter(vm, x)),
+	)
 
-	members(vm, tbl, x)
+	vmTypeDefine(vm, x)
 }

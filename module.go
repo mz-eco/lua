@@ -1,5 +1,9 @@
 package lua
 
+import (
+	R "reflect"
+)
+
 type moduleMembers interface {
 	module()
 }
@@ -25,4 +29,37 @@ func (m *Module) Define(x *Type) {
 
 func LoadModule(vm *VM, loader ModuleLoader) {
 
+	var (
+		m = loader()
+	)
+
+	vm.PreloadModule(
+		m.Name, func(vm *VM) int {
+
+			var (
+				tbl = vm.NewTable()
+			)
+
+			for _, x := range m.types {
+				Define(vm, x)
+			}
+
+			if m.Members != nil {
+
+				members := memberFunctions(
+					m.Members,
+					func(v R.Value, index int, i *Invoker) {
+						i.Caller = func(vm *VM) (R.Value, error) {
+							return v.Method(index), nil
+						}
+					},
+				)
+
+				vm.SetFuncs(tbl, members)
+			}
+
+			vm.Push(tbl)
+
+			return 1
+		})
 }

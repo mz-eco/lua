@@ -108,45 +108,6 @@ func luaValueBuiltin(vm *VM, value R.Value, x *Value) (ok bool) {
 	return
 }
 
-func luaValueClass(vm *VM, v R.Value, x Value) bool {
-
-	if v.Kind() != R.Struct {
-		return false
-	}
-
-	var (
-		t     = v.Type()
-		tbl   = vm.NewTable()
-		funcs = make(map[string]GFunction)
-	)
-
-	for index := 0; index < v.NumField(); index++ {
-
-		var (
-			fv = v.Field(index)
-			ft = t.Field(index)
-		)
-
-		vm.SetField(tbl, ft.Name, luaValue(vm, fv))
-	}
-
-	for index := 0; index < v.NumMethod(); index++ {
-		//var (
-		//	mv = v.Method(index)
-		//	mm = t.Method(index)
-		//	mt = mm.Type
-		//)
-		//
-		//funcs[mm.Name] = func(vm *VM) int {
-		//	return 0
-		//}
-	}
-
-	vm.SetFuncs(tbl, funcs)
-
-	return true
-}
-
 func unSupport(kind R.Kind, customs ...R.Kind) bool {
 
 	switch kind {
@@ -163,48 +124,54 @@ func unSupport(kind R.Kind, customs ...R.Kind) bool {
 	return false
 }
 
-func luaValueObject(vm *VM, v R.Value, x *Value) (ok bool) {
+func luaValueObject(vm *VM, v R.Value, x *Value) bool {
 
 	var (
-		t    = v.Type()
 		kind = v.Kind()
 	)
-
-	ok = true
 
 	if kind != R.Struct {
 		return false
 	}
 
+	panic(fmt.Sprintf(
+		"colud not convert struct <%s> to <lua.Value>, struct must implement lua.TableMapping", v.Type()))
+
+}
+
+func luaValueTypes(vm *VM, v R.Value, x *Value) bool {
+
 	var (
-		n   = t.NumField()
-		tbl = vm.NewTable()
+		vt     = v.Type()
+		xt, ok = vmTypeLookup(vm, vt)
 	)
 
-	for index := 0; index < n; index++ {
+	fmt.Println(xt, ok)
 
-		var (
-			vf   = v.Field(index)
-			tf   = t.Field(index)
-			kind = vf.Kind()
-			tags = makeTags(tf)
-		)
-
-		if tags.skip {
-			continue
-		}
-
-		if unSupport(kind, R.Func) {
-			continue
-		}
-
-		vm.SetField(tbl, tf.Name, luaValue(vm, vf))
-
+	if !ok {
+		return false
 	}
 
-	*x = tbl
+	i, ok := v.Interface().(class)
 
-	return
+	if !ok {
+		panic("logic error")
+	}
+
+	value := i.getValue()
+
+	if value != nil {
+		*x = value
+	} else {
+		ud := vm.NewUserData()
+		ud.Value = i
+
+		vm.SetMetatable(ud, vm.GetTypeMetatable(xt.name))
+		i.setValue(ud)
+		*x = ud
+	}
+
+	return true
 }
 
 func luaValue(vm *VM, v R.Value) (x Value) {
@@ -212,12 +179,13 @@ func luaValue(vm *VM, v R.Value) (x Value) {
 	x = Nil
 
 	switch {
+	case luaValueTypes(vm, v, &x):
 	case luaValueBuiltin(vm, v, &x):
 	case luaValuePod(vm, v, &x):
 	case luaValueObject(vm, v, &x):
 	default:
 		vm.RaiseError(
-			"convert <> golang type %s to lua value error", v.Type())
+			"convert <> golang type <%s> to lua.value error", v.Type())
 	}
 
 	return
@@ -673,7 +641,6 @@ func goValueObject(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 		t    = v.Type()
 		kind = v.Kind()
 		lt   = src.Type()
-		n    = v.NumField()
 	)
 
 	ok = true
@@ -681,6 +648,8 @@ func goValueObject(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 	if kind != R.Struct || lt != lua.LTTable {
 		return false
 	}
+
+	n := v.NumField()
 
 	for index := 0; index < n; index++ {
 
@@ -712,7 +681,6 @@ func goValueObject(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 
 func goValueBuiltin(vm *VM, v R.Value, src Value, opts *asOptions) (ok bool) {
 
-	fmt.Println(v.Type(), v.CanInterface())
 	if !v.CanInterface() {
 		return false
 	}

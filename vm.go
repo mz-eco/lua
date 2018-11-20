@@ -7,5 +7,7 @@ import (
 type LGFunction func(vm *VM) int
 
 func New() *VM {
-	return lua.NewState()
+	return lua.NewState(lua.Options{
+		IncludeGoStackTrace: true,
+	})
 }
