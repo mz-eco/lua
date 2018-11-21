@@ -11,8 +11,10 @@ type Call struct {
 	Args []Value
 }
 
-func (m *Call) ArgError(n int, format string, v ...interface{}) {
+func (m *Call) ArgError(n int, format string, v ...interface{}) int {
 	m.vm.ArgError(n, fmt.Sprintf(format, v...))
+
+	return 0
 }
 
 func (m *Call) Push(values ...Value) int {
@@ -27,7 +29,7 @@ func (m *Call) Push(values ...Value) int {
 func (m *Call) oValues(src []R.Value) int {
 
 	var (
-		dec    = NewEncoder(m.vm, true)
+		dec    = NewEncoder(m.vm, FlagSkipMethod)
 		values = make([]Value, 0)
 	)
 
@@ -50,7 +52,7 @@ func (m *Call) oValues(src []R.Value) int {
 func (m *Call) Return(args ...interface{}) int {
 
 	var (
-		dec    = NewEncoder(m.vm, true)
+		dec    = NewEncoder(m.vm, FlagSkipMethod)
 		values = make([]Value, 0)
 	)
 

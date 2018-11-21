@@ -23,8 +23,12 @@ func VMFunction(vm *VM, name string, v interface{}) error {
 
 func VMValue(vm *VM, name string, v interface{}) error {
 
-	return As(
-		vm,
+	var (
+		decoder = NewDeocder(vm, FlagSkipMethod)
+	)
+
+	return decoder.Decode(
 		vm.GetGlobal(name),
-		v)
+		v,
+	)
 }

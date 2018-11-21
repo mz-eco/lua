@@ -115,6 +115,10 @@ func setter(vm *VM, x *Type) GFunction {
 
 func getter(vm *VM, x *Type) GFunction {
 
+	var (
+		mems = make(map[string]*Function)
+	)
+
 	members := memberFunctions(x.Type, func(v R.Value, m int, i *Invoker) {
 
 		i.Caller = func(vm *VM) (R.Value, error) {
@@ -132,6 +136,10 @@ func getter(vm *VM, x *Type) GFunction {
 
 	})
 
+	for name, member := range members {
+		mems[name] = vm.NewFunction(member)
+	}
+
 	i := &Invoker{
 		Name: "__index",
 		GoFunc: func(c *Call) int {
@@ -146,7 +154,7 @@ func getter(vm *VM, x *Type) GFunction {
 			}
 
 			if len(c.Args) != 1 {
-				c.ArgError(1, "setter argument error.")
+				c.ArgError(1, "getter argument error.")
 				return 0
 			}
 
@@ -163,18 +171,25 @@ func getter(vm *VM, x *Type) GFunction {
 
 			if !field.IsValid() {
 
-				member, ok := members[name]
+				mem, ok := mems[name]
 
 				if !ok {
-					c.ArgError(1, "element %s not found.", name)
+					c.ArgError(1, "field %s not found.", name)
 					return 0
 				}
-				return member(c.vm)
+				return c.Push(mem)
+			} else {
+				encoder := NewEncoder(vm, FlagSkipMethod|FlagTyped)
+
+				value, err := encoder.Encode(field)
+
+				if err != nil {
+					c.ArgError(1, err.Error())
+				}
+
+				return c.Push(value)
+
 			}
-
-			c.vm.Push(luaValue(c.vm, field))
-
-			return 1
 		},
 	}
 

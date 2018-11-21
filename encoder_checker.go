@@ -5,7 +5,7 @@ import (
 )
 
 type EncodeChecker struct {
-	encoder
+	encoding
 	skipMethod bool
 }
 
@@ -182,7 +182,7 @@ func (m *EncodeChecker) encode(src R.Type, trace ...interface{}) error {
 	case R.String:
 		return m.str(src)
 	case R.Struct:
-		return m.error(errObject)
+		return m.errorObject(src)
 	case R.Slice:
 		return m.slice(src)
 	case R.Map:

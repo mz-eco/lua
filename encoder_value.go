@@ -3,20 +3,29 @@ package lua
 import (
 	R "reflect"
 
-	lua "github.com/yuin/gopher-lua"
+	"github.com/yuin/gopher-lua"
 )
 
 type Encoder struct {
-	encoder
+	encoding
 	vm         *VM
 	skipMethod bool
+	typed      bool
 }
 
-func NewEncoder(vm *VM, skipMethod bool) *Encoder {
+type EncodingFlags int
+
+const (
+	FlagSkipMethod EncodingFlags = 0x1 << 1
+	FlagTyped                    = 0x1 << 2
+)
+
+func NewEncoder(vm *VM, flags EncodingFlags) *Encoder {
 
 	return &Encoder{
 		vm:         vm,
-		skipMethod: skipMethod,
+		skipMethod: (flags & FlagSkipMethod) == FlagSkipMethod,
+		typed:      (flags & FlagTyped) == FlagTyped,
 	}
 }
 
@@ -42,6 +51,8 @@ func (m *Encoder) Encode(src interface{}) (to Value, err error) {
 }
 
 func (m *Encoder) class(src R.Value, to *Value) error {
+
+	m.typed = true
 
 	var (
 		vt     = src.Type()
@@ -70,13 +81,19 @@ func (m *Encoder) class(src R.Value, to *Value) error {
 	return nil
 }
 
-func (m *Encoder) mapping(ov R.Value, to *Value) error {
+func (m *Encoder) mapping(src R.Value, to *Value) error {
 
 	var (
 		fields  = make(map[string]Value)
 		members map[string]GFunction
-		ot      = ov.Type()
+		ot      = src.Type()
+		ov      = src
 	)
+
+	if ov.Kind() == R.Ptr {
+		ov = ov.Elem()
+		ot = ov.Type()
+	}
 
 	for index := 0; index < ov.NumField(); index++ {
 
@@ -88,6 +105,10 @@ func (m *Encoder) mapping(ov R.Value, to *Value) error {
 		)
 
 		if tag.skip {
+			continue
+		}
+
+		if ft.Type == TableMappingClass {
 			continue
 		}
 
@@ -247,14 +268,14 @@ func (m *Encoder) builtin(src R.Value, x *Value) error {
 	case *lua.LUserData:
 		*x = v
 	default:
-		return m.errorBuiltin(v)
+		return m.errorBuiltin(v, R.TypeOf(x).Elem())
 	}
 
 	return nil
 }
 
 func (m *Encoder) fn(src R.Value, to *Value) error {
-	return nil
+	return NotSupportFunc
 }
 
 func (m *Encoder) channel(src R.Value, to *Value) error {
@@ -290,6 +311,14 @@ func (m *Encoder) float(src R.Value, to *Value) error {
 
 func (m *Encoder) encode(src R.Value, to *Value, trace ...interface{}) error {
 
+	var (
+		typed = m.typed
+	)
+
+	defer func() {
+		m.typed = typed
+	}()
+
 	if len(trace) > 0 {
 
 		var (
@@ -311,17 +340,25 @@ func (m *Encoder) encode(src R.Value, to *Value, trace ...interface{}) error {
 		return m.error(errInvalidValue)
 	}
 
-	var (
-		t = src.Type()
-	)
+	if src.CanInterface() {
+		i := src.Interface()
 
-	switch {
-	case t.Implements(typeClass):
-		return m.class(src, to)
-	case t.Implements(typeTableMapping):
-		return m.mapping(src, to)
-	case t.Implements(typeValue):
-		return m.builtin(src, to)
+		if _, ok := i.(Value); ok {
+			return m.builtin(src, to)
+		}
+
+		if _, ok := i.(class); ok {
+			return m.class(src, to)
+		}
+
+		if _, ok := i.(tableMapping); ok {
+
+			if m.typed {
+				return m.error(errTypedChild)
+			}
+
+			return m.mapping(src, to)
+		}
 	}
 
 	switch src.Kind() {
@@ -338,13 +375,13 @@ func (m *Encoder) encode(src R.Value, to *Value, trace ...interface{}) error {
 	case R.String:
 		return m.str(src, to)
 	case R.Struct:
-		return m.error(errObject)
+		return m.errorObject(src.Type())
 	case R.Slice:
 		return m.slice(src, to)
 	case R.Map:
 		return m.mapping(src, to)
 	case R.Func:
-		return NotSupportFunc
+		return m.fn(src, to)
 	case R.Interface, R.Complex64, R.Complex128, R.Array, R.UnsafePointer, R.Invalid, R.Uintptr:
 		fallthrough
 	default:

@@ -10,174 +10,6 @@ import (
 	R "reflect"
 )
 
-func luaValuePod(vm *VM, v R.Value, x *Value) (ok bool) {
-
-	ok = true
-
-	switch v.Kind() {
-	case R.Int, R.Int8, R.Int16, R.Int32, R.Int64:
-		*x = Number(v.Int())
-	case R.Uint, R.Uint16, R.Uint32, R.Uint64:
-		*x = Number(v.Uint())
-	case R.String:
-		*x = String(v.String())
-	case R.Bool:
-		*x = Bool(v.Bool())
-	case R.Float32, R.Float64:
-		*x = Number(v.Float())
-	case R.Slice:
-		var (
-			tbl = vm.NewTable()
-		)
-
-		for index := 0; index < v.Len(); index++ {
-			tbl.Append(
-				luaValue(vm, v.Index(index)))
-		}
-
-		*x = tbl
-	case R.Map:
-
-		var (
-			tbl = vm.NewTable()
-		)
-
-		for _, key := range v.MapKeys() {
-			tbl.RawSetH(
-				luaValue(vm, key),
-				luaValue(vm, v.MapIndex(key)))
-		}
-
-		*x = tbl
-	case R.Ptr:
-		*x = luaValue(vm, v.Elem())
-	default:
-		ok = false
-	}
-
-	return
-}
-
-func luaValueBuiltin(vm *VM, value R.Value, x *Value) (ok bool) {
-
-	if !value.CanInterface() {
-		return false
-	}
-
-	ok = true
-
-	var (
-		i = value.Interface()
-	)
-
-	switch v := i.(type) {
-	case *Function:
-		*x = v
-	case Value:
-		*x = v
-	case Number:
-		*x = v
-	case *Table:
-		*x = v
-	case Bool:
-		*x = v
-	case String:
-		*x = v
-	case lua.LChannel:
-		*x = v
-	case *lua.LUserData:
-		*x = v
-
-	default:
-		ok = false
-	}
-
-	return
-}
-
-func unSupport(kind R.Kind, customs ...R.Kind) bool {
-
-	switch kind {
-	case R.Complex128, R.Complex64, R.Uintptr, R.UnsafePointer, R.Array, R.Chan:
-		return true
-	}
-
-	for _, c := range customs {
-		if kind == c {
-			return false
-		}
-	}
-
-	return false
-}
-
-func luaValueObject(vm *VM, v R.Value, x *Value) bool {
-
-	var (
-		kind = v.Kind()
-	)
-
-	if kind != R.Struct {
-		return false
-	}
-
-	panic(fmt.Sprintf(
-		"colud not convert struct <%s> to <lua.Value>, struct must implement lua.TableMapping", v.Type()))
-
-}
-
-func luaValueTypes(vm *VM, v R.Value, x *Value) bool {
-
-	var (
-		vt     = v.Type()
-		xt, ok = typeLookup(vm, vt)
-	)
-
-	fmt.Println(xt, ok)
-
-	if !ok {
-		return false
-	}
-
-	i, ok := v.Interface().(class)
-
-	if !ok {
-		panic("logic error")
-	}
-
-	value := i.getValue()
-
-	if value != nil {
-		*x = value
-	} else {
-		ud := vm.NewUserData()
-		ud.Value = i
-
-		vm.SetMetatable(ud, vm.GetTypeMetatable(xt.name))
-		i.setValue(ud)
-		*x = ud
-	}
-
-	return true
-}
-
-func luaValue(vm *VM, v R.Value) (x Value) {
-
-	x = Nil
-
-	switch {
-	case luaValueTypes(vm, v, &x):
-	case luaValueBuiltin(vm, v, &x):
-	case luaValuePod(vm, v, &x):
-	case luaValueObject(vm, v, &x):
-	default:
-		vm.RaiseError(
-			"convert <> golang type <%s> to lua.value error", v.Type())
-	}
-
-	return
-}
-
 type asOptions struct {
 	vm       *VM
 	field    string
@@ -481,6 +313,9 @@ func makeFunc(vm *VM, v R.Value, src, self Value) R.Value {
 					raise:    false,
 					optional: false,
 				}
+				encoder = NewEncoder(vm, FlagSkipMethod)
+				value   Value
+				err     error
 			)
 
 			results = make([]R.Value, no)
@@ -493,11 +328,24 @@ func makeFunc(vm *VM, v R.Value, src, self Value) R.Value {
 				i = append(i, self)
 			}
 
-			for _, arg := range args {
-				i = append(i, luaValue(vm, arg))
+			for index, arg := range args {
+
+				value, err = encoder.Encode(arg)
+
+				if err != nil {
+					vm.ArgError(index, err.Error())
+					break
+				}
+
+				i = append(i, value)
 			}
 
-			err := vm.CallByParam(
+			if err != nil {
+				results[ret] = R.ValueOf((*error)(&err)).Elem()
+				return
+			}
+
+			err = vm.CallByParam(
 				lua.P{
 					Fn:      fn,
 					NRet:    ret,
@@ -718,8 +566,4 @@ func As(vm *VM, src Value, value interface{}) error {
 	return errTypeConvert{
 		"", src.Type(), v.Type(),
 	}
-}
-
-func ToValue(vm *VM, v interface{}) Value {
-	return luaValue(vm, R.ValueOf(v))
 }

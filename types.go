@@ -39,9 +39,14 @@ func typedCaller(_ *Call) int { return 0 }
 
 var (
 	typeNil          = R.TypeOf(nil)
+	typeChannel      = R.TypeOf((lua.LChannel)(nil))
 	typeTableMapping = R.TypeOf((*tableMapping)(nil))
 	typeClass        = R.TypeOf((*class)(nil)).Elem()
 	typeCall         = R.TypeOf((*Call)(nil))
 	typeCaller       = R.TypeOf(typedCaller)
 	typeValue        = R.TypeOf((*Value)(nil)).Elem()
+
+	typeGFunc = R.TypeOf((GFunction)(nil))
+
+	TableMappingClass = R.TypeOf((*TableMapping)(nil)).Elem()
 )
