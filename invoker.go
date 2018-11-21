@@ -94,9 +94,11 @@ func (m *Invoker) Invoke(vm *VM) int {
 		return 0
 	}
 
+	call := newCall(vm, m.Name)
+
 	if m.caller {
 		caller := fn.Interface().(func(call *Call) int)
-		return caller(newCall(vm))
+		return caller(call)
 	}
 
 	i, index, err := m.iValues(vm)
@@ -119,11 +121,8 @@ func (m *Invoker) Invoke(vm *VM) int {
 		}
 	}
 
-	for index := 0; index < m.ret; index++ {
-		vm.Push(luaValue(vm, o[index]))
-	}
+	return call.oValues(o[0:m.ret])
 
-	return m.ret
 }
 
 func VMGFunction(i *Invoker) GFunction {
@@ -198,7 +197,7 @@ func memberFunctions(value interface{}, cb func(v R.Value, m int, i *Invoker)) (
 
 	var (
 		x R.Type
-		v = R.ValueOf(value)
+		v = R.Value{}
 	)
 
 	switch n := value.(type) {
@@ -206,8 +205,10 @@ func memberFunctions(value interface{}, cb func(v R.Value, m int, i *Invoker)) (
 		x = n
 	case R.Value:
 		x = n.Type()
+		v = n
 	default:
 		x = R.TypeOf(value)
+		v = R.ValueOf(value)
 	}
 
 	if x.Kind() == R.Ptr {
@@ -232,7 +233,9 @@ func memberFunctions(value interface{}, cb func(v R.Value, m int, i *Invoker)) (
 			}
 		)
 
-		cb(v, index, i)
+		if cb != nil {
+			cb(v, index, i)
+		}
 
 		members[i.Name] = VMGFunction(i)
 

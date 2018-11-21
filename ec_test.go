@@ -2,7 +2,6 @@ package lua
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 )
 
@@ -12,8 +11,7 @@ type AA struct {
 
 func TestName(t *testing.T) {
 
-	at := reflect.TypeOf(AA{})
-	ax := reflect.Zero(at)
+	v := []int{1, 2, 3, 4}
 
-	fmt.Println(ax)
+	fmt.Println(v[0:3])
 }
